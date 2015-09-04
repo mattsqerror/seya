@@ -26,6 +26,12 @@ def _proxInnov(x, x_tm1):
     i1 = T.minimum(i0, -1)
     return i1
 
+def _FistaStep(cost, states, old_x, lr=.001, lambdav=.1, prior=0):
+    grads = T.grad(cost,states)
+    new_x = _proxOp(states-lr*grads, lr*lambdav)
+    new_y = new_x + (new_x - old_x)
+    return theano.gradient.disconnected_grad(new_x)
+
 
 def _IstaStep(cost, states, lr=.001, lambdav=.1, prior=0):
     grads = T.grad(cost, states)
@@ -90,19 +96,28 @@ class SparseCoding(Layer):
     def get_initial_states(self, X):
         return alloc_zeros_matrix(X.shape[0], self.output_dim)
 
-    def _step(self, x_t, inputs, prior, W):
+    def _step(self, x_t, x_tm1, inputs, prior, W):
         outputs = self.activation(T.dot(x_t, self.W))
         rec_error = T.sqr(inputs - outputs).sum()
-        x = _IstaStep(rec_error, x_t, lambdav=self.gamma, prior=prior)
-        return x, outputs
+        #x = _IstaStep(rec_error, x_t, lambdav=self.gamma, prior=prior)
+        x = _FistaStep(rec_error, x_t, x_tm1, lambdav=self.gamma, prior=prior)
+        return x, x_t, outputs
 
     def _get_output(self, inputs, train=False, prior=0):
         initial_states = self.get_initial_states(inputs)
+        # outputs, updates = theano.scan(
+        #     self._step,
+        #     sequences=[],
+        #     outputs_info=[initial_states, None],
+        #     non_sequences=[inputs, prior, self.W],
+        #     n_steps=self.n_steps,
+        #     truncate_gradient=self.truncate_gradient)
+
         outputs, updates = theano.scan(
             self._step,
             sequences=[],
-            outputs_info=[initial_states, None],
-            non_sequences=[inputs, prior, self.W],
+            outputs_info=[initial_states, initial_states, None], # match up with return of _step
+            non_sequences=[inputs, prior, self.W], 
             n_steps=self.n_steps,
             truncate_gradient=self.truncate_gradient)
 
